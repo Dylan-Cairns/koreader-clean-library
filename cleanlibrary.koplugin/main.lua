@@ -14,7 +14,9 @@ manager, History and Collections). Per row:
     mostly blank paper the row shows the generic cover instead of a washed-out
     scan;
   * replaces underscores with spaces in list titles (optionally; see
-    REPLACE_UNDERSCORES below).
+    REPLACE_UNDERSCORES below);
+  * keeps row heights uniform when a hidden page-info footer would otherwise
+    still reserve space (Visual Overhaul Suite's "hide pagination").
 
 Cell geometry (uniform 2:3, radius 8) follows ZenOS 4.3.2 (GPL-3.0),
 common/cover_utils.lua and modules/filebrowser/patches/browser_list_item_layout.lua;
@@ -305,7 +307,51 @@ local function clean_widget_text(widget)
     end
 end
 
--- 7) Hooking CoverBrowser's row class ----------------------------------------
+-- 7) Rows must not reserve a footer that is not shown --------------------------
+
+-- CoverBrowser sizes rows from the menu height minus the title bar and the
+-- page-info footer (ListMenu:_recalculateDimen). Some plugins hide the footer
+-- by detaching its widgets from the layout but leave `menu.page_info` set, so
+-- its height is still subtracted and those lists get shorter rows than the
+-- file browser. Visual Overhaul Suite's "hide pagination" does exactly this:
+-- History and Collections rows come out ~15px shorter than the file manager's.
+-- Recalculate as if the footer were gone; the widget is restored afterwards so
+-- showing it again still works.
+
+local function contains_widget(root, target)
+    if root == target then return true end
+    if type(root) ~= "table" then return false end
+    for i = 1, #root do
+        local child = root[i]
+        if type(child) == "table" and contains_widget(child, target) then
+            return true
+        end
+    end
+    return false
+end
+
+local function ensure_footer_shim(menu)
+    local page_info = menu.page_info
+    if not page_info or contains_widget(menu, page_info) then return end
+    local orig = menu._recalculateDimen
+    -- CoverBrowser reassigns `_recalculateDimen` on its list menus, so keep
+    -- wrapping whatever is current instead of assuming ours is still installed.
+    if type(orig) ~= "function" or menu._cleanlibrary_footer_shim == orig then return end
+    local wrapper = function(self, ...)
+        local info = self.page_info
+        if not info or contains_widget(self, info) then
+            return orig(self, ...)
+        end
+        self.page_info = nil
+        local ok, err = pcall(orig, self, ...)
+        self.page_info = info
+        if not ok then error(err, 0) end
+    end
+    menu._cleanlibrary_footer_shim = wrapper
+    menu._recalculateDimen = wrapper
+end
+
+-- 8) Hooking CoverBrowser's row class ----------------------------------------
 
 local list_item_patched = false
 
@@ -360,7 +406,7 @@ local function hook_list_item(...)
     return false
 end
 
--- 8) Hook installation --------------------------------------------------------
+-- 9) Hook installation --------------------------------------------------------
 
 local hooks_installed = false
 
@@ -376,6 +422,7 @@ local function install_hooks()
     function Menu.switchItemTable(self, ...)
         self._do_hint_opened = false
         hook_list_item(self)
+        ensure_footer_shim(self)
         return orig_switch_item_table(self, ...)
     end
 
@@ -399,7 +446,7 @@ local function install_hooks()
     end
 end
 
--- 9) Plugin ------------------------------------------------------------------
+-- 10) Plugin ------------------------------------------------------------------
 
 local CleanLibrary = WidgetContainer:extend{
     name = "cleanlibrary",

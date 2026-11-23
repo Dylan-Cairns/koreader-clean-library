@@ -72,6 +72,30 @@ it. When the class cannot be found the plugin logs
 the UI stock instead of failing. Please re-test the file manager, History,
 Collections and PDF rows after upgrading KOReader.
 
+### Visual Overhaul Suite (VOS)
+
+Clean Library and VOS do not call each other and neither is required for the
+other. They do style the same file manager, History and Collections rows, so
+these are the real interactions:
+
+- **Row height.** CoverBrowser derives the row height from the menu height minus
+  the title bar and the page-info footer. VOS's *Page numbers in subtitles*
+  option only adds a subtitle line to the title bar; it does not change the row
+  height. VOS's *hide pagination* option does: for History and Collections it
+  detaches the footer widgets but leaves `menu.page_info` set, so the footer
+  height is still subtracted and those rows end up shorter than the file
+  browser's (measured 229 px vs 244 px on a BOOX Go 6 at 1072x1448). Clean
+  Library notices that the footer is no longer in the layout and recalculates
+  the rows without it, so every view gets 244 px. With VOS disabled the rows
+  are 249 px in every view.
+- **Titles.** VOS's *menu text* setting replaces underscores in list titles.
+  Clean Library does the same when `REPLACE_UNDERSCORES` is on, so with VOS
+  running the two are redundant; set the constant to `false` to leave title
+  handling to VOS.
+- **Title bar.** VOS replaces the file manager title bar (Wi-Fi, battery, clock
+  and optional path). Clean Library does not touch the title bar, and the cover
+  cells follow the row height that the title bar and footer leave available.
+
 ## How it works
 
 - `ListMenuItem:update` (CoverBrowser's row builder) is wrapped once. The
@@ -82,6 +106,11 @@ Collections and PDF rows after upgrading KOReader.
   and from `FileChooser:init` / `refreshPath`. History and Collections build
   their rows through `BookList` without touching `FileChooser`, so hooking only
   the file chooser left them stock when they were opened first.
+- Rows are sized from the menu height minus the title bar and the page-info
+  footer. When a plugin hides the footer by detaching its widgets but leaves
+  `menu.page_info` set (VOS's hide pagination), `_recalculateDimen` is called
+  with `page_info` borrowed out, so the hidden footer no longer reserves
+  height. The widget is put back afterwards, so showing it again still works.
 - Rounded corners follow ZenOS's OPDS cover code: mask the corner pixels with
   the background sampled outside the cell, then paint the anti-aliased border
   on top, so the border arcs are not cut away.
